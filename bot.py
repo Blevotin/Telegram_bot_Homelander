@@ -1,5 +1,5 @@
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 import requests
 from telegram.ext import MessageHandler, filters
 from datetime import datetime
@@ -10,16 +10,23 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+import re
 conn = sqlite3.connect('notes.db')
 cursor = conn.cursor()
 cursor.execute('CREATE TABLE IF NOT EXISTS notes (user_id INTEGER, text TEXT)')
-cursor.execute('CREATE TABLE IF NOT EXISTS users (user_id INTEGER, text TEXT)')
+cursor.execute('CREATE TABLE IF NOT EXISTS users (user_id INTEGER, fio TEXT, age INTEGER)')
 cursor.execute('CREATE TABLE IF NOT EXISTS product (id_product INTEGER, text TEXT, price REAL)')
 cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
-tables = cursor.fetchall()
-print(tables)
-conn.commit()
+cursor.execute("SELECT * FROM users")
+rows = cursor.fetchall()
 
+print("id | fio | age")
+print("---------------")
+for row in rows:
+    print(f"{row[0]} | {row[1]} | {row[2]}")
+conn.commit()
+GET_NAME = 1
+PLACE_ORDER = 3
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Бот запущен!")
@@ -244,10 +251,30 @@ async def get_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def place_an_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
-        await update.message.reply_text(f"Регистрация пройдена")
-
+        if 'fio' in context.user_data:
+            cursor.execute('INSERT INTO users (fio, age) VALUES (?, ?)', (context.user_data['fio'], context.user_data['age']))
+            conn.commit()
+            await update.message.reply_text(f"Ого, {context.user_data['age']}😊")
+            return ConversationHandler.END
+        await update.message.reply_text(f"Регистриция завершина😊")
+        return GET_NAME
     except Exception as e:
         await update.message.reply_text(f"Ошибка:")
+
+async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    data =  update.message.text
+    data = data.split()
+    if len(data) >= 4:
+        fio = data[0] + ' ' + data[1] + ' ' + data[2]
+        age = data[3]
+        context.user_data['fio'] = fio
+        context.user_data['age'] = age
+        await update.message.reply_text(f"Данные сохранены {fio} {age} лет!")
+        return PLACE_ORDER
+    else:
+        await update.message.reply_text("Недостаточно данных")
+
 
 
 TOKEN = "8226370714:AAHyhzM0QuoYOPihLn_npm4KUc8BRSc7ItY"
@@ -261,7 +288,14 @@ app.add_handler(CommandHandler("bin", binance_price))
 app.add_handler(CommandHandler("cource", cbr_currency))
 app.add_handler(CommandHandler("get_week", get_week))
 app.add_handler(CommandHandler("place_an_order", place_an_order))
-
+app.add_handler(ConversationHandler(
+    entry_points=[CommandHandler("place_an_order", place_an_order)],
+    states={
+        GET_NAME: [MessageHandler(filters.TEXT, get_name)],
+        PLACE_ORDER: [MessageHandler(filters.TEXT, place_an_order)],
+    },
+    fallbacks=[],
+))
 
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
