@@ -1,7 +1,6 @@
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 import requests
-from telegram.ext import MessageHandler, filters
 from datetime import datetime
 from bs4 import BeautifulSoup
 import sqlite3
@@ -11,6 +10,10 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import re
+from telegram import ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+
+
 conn = sqlite3.connect('notes.db')
 cursor = conn.cursor()
 cursor.execute('CREATE TABLE IF NOT EXISTS notes (user_id INTEGER, text TEXT)')
@@ -25,11 +28,36 @@ print("---------------")
 for row in rows:
     print(f"{row[0]} | {row[1]} | {row[2]}")
 conn.commit()
-GET_NAME = 1
-PLACE_ORDER = 3
+GET_USER_DATA = 1
+
+from telegram import ReplyKeyboardMarkup, KeyboardButton
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Бот запущен!")
+    # Создаем кнопки
+    keyboard = [
+        [InlineKeyboardButton("Кнопка 1", callback_data='button1')],
+        [InlineKeyboardButton("Кнопка 2", callback_data='button2')],
+        [InlineKeyboardButton("Открыть сайт", url='https://example.com')]
+    ]
+
+    # Создаем разметку клавиатуры
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Отправляем сообщение с кнопками
+    await update.message.reply_text(
+        "Выберите действие:",
+        reply_markup=reply_markup
+    )
+
+# Обработчик нажатий на inline-кнопки
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()  # Подтверждаем нажатие
+
+    if query.data == 'button1':
+        await query.edit_message_text("Вы нажали Кнопку 1!")
+    elif query.data == 'button2':
+        await query.edit_message_text("Вы нажали Кнопку 2!")
 
 async def cbr_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -250,36 +278,49 @@ async def get_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"Ошибка: {str(e)}")
 
 async def place_an_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['in_conversation'] = True
     try:
-        if 'fio' in context.user_data:
-            cursor.execute('INSERT INTO users (fio, age) VALUES (?, ?)', (context.user_data['fio'], context.user_data['age']))
-            conn.commit()
-            await update.message.reply_text(f"Ого, {context.user_data['age']}😊")
-            return ConversationHandler.END
-        await update.message.reply_text(f"Регистриция завершина😊")
-        return GET_NAME
+        await update.message.reply_text("Пожалуйста, введите ваши данные в формате: Фамилия Имя Отчество Возраст")
+        return GET_USER_DATA
     except Exception as e:
         await update.message.reply_text(f"Ошибка:")
+        return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("пизда")
 
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    data =  update.message.text
-    data = data.split()
-    if len(data) >= 4:
-        fio = data[0] + ' ' + data[1] + ' ' + data[2]
-        age = data[3]
-        context.user_data['fio'] = fio
-        context.user_data['age'] = age
-        await update.message.reply_text(f"Данные сохранены {fio} {age} лет!")
-        return PLACE_ORDER
-    else:
-        await update.message.reply_text("Недостаточно данных")
-
+    # try:
+        a = update.message.text
+        data = a.split()
+        print(data, type(data))
+        user_id = update.effective_user.id
+        await update.message.reply_text(user_id)
+        print(len(data))
+        if len(data) >= 4:
+            fio = data[0] + ' ' + data[1] + ' ' + data[2]
+            age = data[3]
+            cursor.execute('INSERT INTO users (user_id, fio, age) VALUES (?, ?, ?)',
+                           (user_id, fio, age))
+            conn.commit()
+            await update.message.reply_text(f"Данные сохранены {fio} {age} лет!")
+            return ConversationHandler.END
+        else:
+            await update.message.reply_text("Недостаточно данных")
+    # except:
+    #     await update.message.reply_text("Ошибка обработки данных")
 
 
 TOKEN = "8226370714:AAHyhzM0QuoYOPihLn_npm4KUc8BRSc7ItY"
 
 app = ApplicationBuilder().token(TOKEN).build()
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("place_an_order", place_an_order)],
+    states={
+        GET_USER_DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
+    },
+    fallbacks=[CommandHandler("cancel", cancel)]
+)
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("weather", weather))
 app.add_handler(CommandHandler("data", timer))
@@ -287,17 +328,8 @@ app.add_handler(CommandHandler("wb", wb_parser))
 app.add_handler(CommandHandler("bin", binance_price))
 app.add_handler(CommandHandler("cource", cbr_currency))
 app.add_handler(CommandHandler("get_week", get_week))
-app.add_handler(CommandHandler("place_an_order", place_an_order))
-app.add_handler(ConversationHandler(
-    entry_points=[CommandHandler("place_an_order", place_an_order)],
-    states={
-        GET_NAME: [MessageHandler(filters.TEXT, get_name)],
-        PLACE_ORDER: [MessageHandler(filters.TEXT, place_an_order)],
-    },
-    fallbacks=[],
-))
+app.add_handler(conv_handler)  # ПОСЛЕДНИЙ
 
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
-print("Бот запущен!")
 app.run_polling()
