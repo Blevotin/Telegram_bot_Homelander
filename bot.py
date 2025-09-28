@@ -12,32 +12,58 @@ from selenium.webdriver.support import expected_conditions as EC
 import re
 from telegram import ReplyKeyboardMarkup, KeyboardButton
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-
+from telegram import ReplyKeyboardMarkup, KeyboardButton
 
 conn = sqlite3.connect('notes.db')
 cursor = conn.cursor()
 cursor.execute('CREATE TABLE IF NOT EXISTS notes (user_id INTEGER, text TEXT)')
 cursor.execute('CREATE TABLE IF NOT EXISTS users (user_id INTEGER, fio TEXT, age INTEGER)')
 cursor.execute('CREATE TABLE IF NOT EXISTS product (id_product INTEGER, text TEXT, price REAL)')
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS orders (
+        order_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        id_product INTEGER,
+        quantity INTEGER DEFAULT 1,
+        order_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(user_id),
+        FOREIGN KEY (id_product) REFERENCES product(id_product)
+    )
+''')
+
 cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+cursor.execute("SELECT * FROM users")
+cursor.execute("PRAGMA table_info(users)")
+columns = [column[1] for column in cursor.fetchall()]
+
 cursor.execute("SELECT * FROM users")
 rows = cursor.fetchall()
 
+print("USERS TABLE:")
 print("id | fio | age")
 print("---------------")
 for row in rows:
     print(f"{row[0]} | {row[1]} | {row[2]}")
+
+# Выводим таблицу product
+cursor.execute("SELECT * FROM product")
+rows = cursor.fetchall()
+
+print("\nPRODUCT TABLE:")
+print("id_product | text | price")
+print("-------------------------")
+for row in rows:
+    print(f"{row[0]} | {row[1]} | {row[2]}")
+
 conn.commit()
 GET_USER_DATA = 1
-
-from telegram import ReplyKeyboardMarkup, KeyboardButton
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Создаем кнопки
     keyboard = [
         [InlineKeyboardButton("Кнопка 1", callback_data='button1')],
         [InlineKeyboardButton("Кнопка 2", callback_data='button2')],
-        [InlineKeyboardButton("Открыть сайт", url='https://example.com')]
+        [InlineKeyboardButton("Меню", callback_data='menu')]
     ]
 
     # Создаем разметку клавиатуры
@@ -49,15 +75,50 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
-# Обработчик нажатий на inline-кнопки
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()  # Подтверждаем нажатие
+    await query.answer()
 
-    if query.data == 'button1':
-        await query.edit_message_text("Вы нажали Кнопку 1!")
-    elif query.data == 'button2':
-        await query.edit_message_text("Вы нажали Кнопку 2!")
+    if query.data == 'item1':
+        await query.edit_message_text("🍕 Пицца Маргарита - 450₽\n\nТоматный соус, моцарелла, базилик")
+        cursor.execute('INSERT INTO product VALUES (?, ?, ?)', (1, "Пицца Маргарита", 450))
+        conn.commit()
+    elif query.data == 'item2':
+        await query.edit_message_text("🍔 Бургер Классический - 350₽\n\nГовяжья котлета, сыр, овощи")
+        cursor.execute('INSERT INTO product VALUES (?, ?, ?)', (2, "Бургер Классический", 350))
+        conn.commit()
+    elif query.data == 'item3':
+        await query.edit_message_text("🍝 Паста Карбонара - 480₽\n\nСпагетти, бекон, сливочный соус")
+        cursor.execute('INSERT INTO product VALUES (?, ?, ?)', (3, "Паста Карбонара", 480))
+        conn.commit()
+    elif query.data == 'item4':
+        await query.edit_message_text("🥗 Салат Цезарь - 350₽\n\nКурица, салат, соус цезарь")
+        cursor.execute('INSERT INTO product VALUES (?, ?, ?)', (4, "Салат Цезарь", 350))
+        conn.commit()
+    elif query.data == 'item5':
+        await query.edit_message_text("🍗 Куриные крылышки - 400₽\n\n8 штук с соусом на выбор")
+        cursor.execute('INSERT INTO product VALUES (?, ?, ?)', (5, "Куриные крылышки", 400))
+        conn.commit()
+    elif query.data == 'item6':
+        await query.edit_message_text("🍟 Картофель фри - 200₽\n\nС кетчупом или майонезом")
+        cursor.execute('INSERT INTO product VALUES (?, ?, ?)', (6, "Картофель фри", 200))
+        conn.commit()
+    elif query.data == 'item7':
+        await query.edit_message_text("🍣 Ролл Калифорния - 550₽\n\n8 штук, краб, авокадо")
+        cursor.execute('INSERT INTO product VALUES (?, ?, ?)', (7, "Ролл Калифорния", 550))
+        conn.commit()
+    elif query.data == 'item8':
+        await query.edit_message_text("🍰 Чизкейк - 250₽\n\nКлассический Нью-Йорк")
+        cursor.execute('INSERT INTO product VALUES (?, ?, ?)', (8, "Чизкейк", 250))
+        conn.commit()
+    elif query.data == 'item9':
+        await query.edit_message_text("🥤 Кола - 120₽\n\n0.5л")
+        cursor.execute('INSERT INTO product VALUES (?, ?, ?)', (9, "Кола", 120))
+        conn.commit()
+    elif query.data == 'item10':
+        await query.edit_message_text("☕ Кофе - 150₽\n\nАмерикано/Капучино/Латте")
+        cursor.execute('INSERT INTO product VALUES (?, ?, ?)', (10, "Кофе", 150))
+        conn.commit()
 
 async def cbr_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -304,12 +365,36 @@ async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
                            (user_id, fio, age))
             conn.commit()
             await update.message.reply_text(f"Данные сохранены {fio} {age} лет!")
-            return ConversationHandler.END
+            await next_function(update, context)
         else:
             await update.message.reply_text("Недостаточно данных")
-    # except:
-    #     await update.message.reply_text("Ошибка обработки данных")
 
+async def next_function(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("🍕 Пицца Маргарита - 450₽", callback_data='item1')],
+        [InlineKeyboardButton("🍔 Бургер Классический - 350₽", callback_data='item2')],
+        [InlineKeyboardButton("🍝 Паста Карбонара - 480₽", callback_data='item3')],
+        [InlineKeyboardButton("🥗 Салат Цезарь - 350₽", callback_data='item4')],
+        [InlineKeyboardButton("🍗 Куриные крылышки - 400₽", callback_data='item5')],
+        [InlineKeyboardButton("🍟 Картофель фри - 200₽", callback_data='item6')],
+        [InlineKeyboardButton("🍣 Ролл Калифорния - 550₽", callback_data='item7')],
+        [InlineKeyboardButton("🍰 Чизкейк - 250₽", callback_data='item8')],
+        [InlineKeyboardButton("🥤 Кола - 120₽", callback_data='item9')],
+        [InlineKeyboardButton("☕ Кофе - 150₽", callback_data='item10')]
+    ]
+
+    # Создаем разметку клавиатуры
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Отправляем сообщение с кнопками
+    await update.message.reply_text(
+        "🍽️ *Меню ресторана*\n\n"
+        "Выберите блюдо:",
+        reply_markup=reply_markup,
+        parse_mode='Markdown'
+    )
+
+    return ConversationHandler.END
 
 TOKEN = "8226370714:AAHyhzM0QuoYOPihLn_npm4KUc8BRSc7ItY"
 
@@ -328,6 +413,7 @@ app.add_handler(CommandHandler("wb", wb_parser))
 app.add_handler(CommandHandler("bin", binance_price))
 app.add_handler(CommandHandler("cource", cbr_currency))
 app.add_handler(CommandHandler("get_week", get_week))
+app.add_handler(CallbackQueryHandler(button_handler))
 app.add_handler(conv_handler)  # ПОСЛЕДНИЙ
 
 app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
