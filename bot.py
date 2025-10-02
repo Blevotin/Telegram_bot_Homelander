@@ -30,7 +30,7 @@ cursor.execute('''
         FOREIGN KEY (id_product) REFERENCES product(id_product)
     )
 ''')
-cursor.execute('INSERT INTO product (id_product, text, price) VALUES (?, ?, ?)', (11, 'Филадельфия', 500))
+# cursor.execute('INSERT INTO product (id_product, text, price) VALUES (?, ?, ?)', (11, 'Филадельфия', 500))
 # cursor.execute('INSERT INTO product (id_product, text, price) VALUES (?, ?, ?)', (1, 'Пицца Маргарита', 450 ))
 # cursor.execute('INSERT INTO product (id_product, text, price) VALUES (?, ?, ?)', (2, 'Бургер Классический', 350 ))
 # cursor.execute('INSERT INTO product (id_product, text, price) VALUES (?, ?, ?)', (3, 'Паста Карбонара', 380 ))
@@ -61,10 +61,20 @@ cursor.execute("SELECT * FROM product")
 rows = cursor.fetchall()
 
 print("\nPRODUCT TABLE:")
-print("id_product | text | price")
+print("order_id | text | price")
 print("-------------------------")
 for row in rows:
     print(f"{row[0]} | {row[1]} | {row[2]}")
+
+# Выводим таблицу product
+cursor.execute("SELECT * FROM orders")
+rows = cursor.fetchall()
+
+print("\nORDERS TABLE:")
+print("id_product | user_id | id_product | quantity | order_date")
+print("----------------------------------------------------------")
+for row in rows:
+    print(f"{row[0]} | {row[1]} | {row[2]} | {row[4]}")
 
 conn.commit()
 GET_USER_DATA = 1
@@ -88,38 +98,32 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    user_id = update.effective_user.id
 
-    if query.data == 'item1':
-        await query.edit_message_text("🍕 Пицца Маргарита - 450₽\n\nТоматный соус, моцарелла, базилик")
+    if query.data.startswith('item_'):
+        # Достаем ID продукта из callback_data
+        product_id = int(query.data.split('_')[1])
 
-    elif query.data == 'item2':
-        await query.edit_message_text("🍔 Бургер Классический - 350₽\n\nГовяжья котлета, сыр, овощи")
+        # Проверяем регистрацию
+        cursor.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,))
+        if not cursor.fetchone():
+            await query.edit_message_text("❌ Сначала зарегистрируйтесь!")
+            return
 
-    elif query.data == 'item3':
-        await query.edit_message_text("🍝 Паста Карбонара - 480₽\n\nСпагетти, бекон, сливочный соус")
+        # Получаем данные продукта из базы
+        cursor.execute('SELECT text, price FROM product WHERE id_product = ?', (product_id,))
+        product = cursor.fetchone()
 
-    elif query.data == 'item4':
-        await query.edit_message_text("🥗 Салат Цезарь - 350₽\n\nКурица, салат, соус цезарь")
+        if product:
+            name, price = product
+            # Добавляем в заказ
+            cursor.execute(
+                'INSERT INTO orders (user_id, id_product, quantity) VALUES (?, ?, 1)',
+                (user_id, product_id)
+            )
+            conn.commit()
 
-    elif query.data == 'item5':
-        await query.edit_message_text("🍗 Куриные крылышки - 400₽\n\n8 штук с соусом на выбор")
-
-    elif query.data == 'item6':
-        await query.edit_message_text("🍟 Картофель фри - 200₽\n\nС кетчупом или майонезом")
-
-    elif query.data == 'item7':
-        await query.edit_message_text("🍣 Ролл Калифорния - 550₽\n\n8 штук, краб, авокадо")
-
-    elif query.data == 'item8':
-        await query.edit_message_text("🍰 Чизкейк - 250₽\n\nКлассический Нью-Йорк")
-
-    elif query.data == 'item9':
-        await query.edit_message_text("🥤 Кола - 120₽\n\n0.5л")
-
-    elif query.data == 'item10':
-        await query.edit_message_text("☕ Кофе - 150₽\n\nАмерикано/Капучино/Латте")
-
+            await query.edit_message_text(f"✅ {name} добавлен в заказ!\nЦена: {price}₽")
 
 async def cbr_currency(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -352,40 +356,53 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("пизда")
 
 async def get_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # try:
+    try:
         a = update.message.text
         data = a.split()
-        print(data, type(data))
         user_id = update.effective_user.id
-        await update.message.reply_text(user_id)
-        print(len(data))
+
+        # Проверяем, зарегистрирован ли уже пользователь
+        cursor.execute('SELECT 1 FROM users WHERE user_id = ?', (user_id,))
+        user_exists = cursor.fetchone() is not None
+
+        if user_exists:
+            await update.message.reply_text("Вы уже зарегистрированы!")
+            return ConversationHandler.END  # ← ВАЖНО: завершаем диалог
+
         if len(data) >= 4:
             fio = data[0] + ' ' + data[1] + ' ' + data[2]
             age = data[3]
+
             cursor.execute('INSERT INTO users (user_id, fio, age) VALUES (?, ?, ?)',
                            (user_id, fio, age))
             conn.commit()
             await update.message.reply_text(f"Данные сохранены {fio} {age} лет!")
-            await next_function(update, context)
-        else:
-            await update.message.reply_text("Недостаточно данных")
 
+            # Показываем меню после регистрации
+            await next_function(update, context)
+            return ConversationHandler.END  # ← ВАЖНО: завершаем диалог
+        else:
+            await update.message.reply_text("Недостаточно данных. Введите: Фамилия Имя Отчество Возраст")
+            return GET_USER_DATA  # ← Остаемся в том же состоянии для повторного ввода
+
+    except Exception as e:
+        await update.message.reply_text(f"Ошибка: {str(e)}")
+        return ConversationHandler.END  # ← Завершаем при ошибке
 
 async def next_function(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Получаем все блюда из таблицы
+    # Берем ВСЕ продукты из базы
     cursor.execute('SELECT id_product, text, price FROM product')
     products = cursor.fetchall()
 
-    # Создаем кнопки из данных базы
+    # Создаем кнопки из базы
     keyboard = []
     for product in products:
         product_id, name, price = product
-        button_text = f"{name} - {price}₽"  # ← ЭТА СТРОКА ОБЯЗАТЕЛЬНА!
-        keyboard.append([InlineKeyboardButton(button_text, callback_data=f'item_{product_id}')])
+        # callback_data содержит ID продукта
+        keyboard.append([InlineKeyboardButton(f"{name} - {price}₽", callback_data=f'item_{product_id}')])
 
     reply_markup = InlineKeyboardMarkup(keyboard)
     await update.message.reply_text("🍽️ Меню:", reply_markup=reply_markup)
-    return ConversationHandler.END
 
 TOKEN = "8226370714:AAHyhzM0QuoYOPihLn_npm4KUc8BRSc7ItY"
 
